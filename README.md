@@ -1,0 +1,2 @@
+# ExcalidrawForVue
+这是一个集成在vue框架上的画图软件Excalidraw
