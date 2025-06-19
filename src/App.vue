@@ -769,7 +769,7 @@ export default {
               this.reloadCanvas(jsonData);
               this.$message.success("导入成功!");
             } else {
-              this.$message.error("JSON格式无效，缺少必要的画布数据");
+              this.$message.error("JSON格式无效，缺少必要的画布数据，请检查！");
             }
           } catch (error) {
             console.error("导入JSON时出错:", error);
