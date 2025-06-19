@@ -1,5 +1,5 @@
 <template>
-  <div class="container">
+  <div class="container" v-loading="loading" element-loading-text="画布加载中...">
     <!-- 画布区域 -->
     <div 
       class="excalidraw" 
@@ -10,19 +10,6 @@
 
     <!-- 控制面板 -->
     <div class="control-panel">
-      <!-- 线条粗细控制 -->
-      <div class="slider-container">
-        <span>线条粗细</span>
-        <el-slider 
-          v-model="strokeWidth" 
-          :min="0.3" 
-          :max="15" 
-          :step="1"
-          @change="updateStrokeWidth"
-        />
-        <span>{{ strokeWidth }}px</span>
-      </div>
-      
       <!-- 图库按钮 -->
       <el-button 
         type="primary" 
@@ -35,7 +22,8 @@
       <!-- 其他功能按钮 -->
       <div class="action-buttons">
         <button @click="save">保存画布</button>
-        <button @click="exportAsJson">导出为JSON</button>
+        <button @click="exportAsJson">导出为可编辑文件</button>
+        
         <input 
           type="file" 
           id="jsonImport" 
@@ -43,77 +31,132 @@
           @change="importFromJson"
           style="display: none"
         />
-        <button @click="triggerImport">导入JSON</button>
+        <button @click="triggerImport">导入可编辑文件</button>
+        <button @click="exportAsPng" >导出为PNG</button>
+        <button @click="exportAsSvg" >导出为SVG</button>
         <button @click="toggleCustomUI">
           {{ showCustomUI ? '简化界面' : '完整界面' }}
         </button>
       </div>
     </div>
-    
+
     <!-- 图库抽屉 -->
-   
-      <div v-show="drawer" class="gallery-content">
-        <!-- <div class="drag-instructions">
-          <span style="color: #038fe5;">拖拽素材添加到画布</span>
-        </div> -->
-        
-        <div class="gallery-grid">
-          <div 
-            v-for="(image, index) in galleryImages" 
-            :key="image.id" 
-            class="gallery-item"
-          >
-            <div class="image-container">
-              <img :src="base64Images[image.id]" :alt="image.name" />
-            </div>
-            
+    <div v-show="drawer" class="gallery-content" style="margin-right: 5px;">
+      <div class="drag-instructions">
+        <span style="color: #038fe5;">点击或拖拽素材添加到画布</span>
+      </div>
+      
+      <div class="gallery-grid">
+        <div 
+          v-for="(image, index) in galleryImages" 
+          :key="image.id" 
+          class="gallery-item"
+          @click="addImageToCanvas(image.id)"
+        >
+          <div class="image-container">
+            <img :src="base64Images[image.id]" :alt="image.name" />
+          </div>
+          <div class="image-info">
+            <span class="image-name">{{ image.name }}</span>
+            <span class="drag-hint">点击添加到画布</span>
           </div>
         </div>
       </div>
- 
+    </div>
+
+    <!-- 成功提示 -->
+    <div v-if="showDropSuccess" class="drop-success-message">
+      <i class="el-icon-success"></i>
+      <span>{{ successMessage }}</span>
+    </div>
   </div>
 </template>
 
 <script>
 import { createRoot } from "react-dom/client";
 import React from "react";
-import { Excalidraw } from "@excalidraw/excalidraw";
+import { Excalidraw, exportToCanvas, exportToSvg } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
-
-
 
 let root = null;
 let excalidrawAPI = null;
 
+// 自定义画笔粗细组件
+const StrokeWidthSlider = ({ strokeWidth, onStrokeWidthChange }) => {
+  return React.createElement('div', {
+    className: 'stroke-width-slider-container',
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+      padding: '8px 12px',
+      backgroundColor: 'var(--island-bg-color)',
+      borderRadius: '8px',
+      border: '1px solid var(--default-border-color)',
+      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)',
+      fontSize: '12px',
+      color: 'var(--text-color-primary)',
+      userSelect: 'none',
+      zIndex: 100
+    }
+  }, [
+    React.createElement('span', { 
+      key: 'label',
+      style: { 
+        fontWeight: '500',
+        minWidth: '30px'
+      }
+    }, '线条粗细'),
+    React.createElement('input', {
+      key: 'slider',
+      type: 'range',
+      min: 0.1,
+      max: 10,
+      step: 0.1,
+      value: strokeWidth,
+      onChange: (e) => onStrokeWidthChange(e.target.value),
+      style: {
+        width: '80px',
+        height: '4px',
+        backgroundColor: 'var(--default-border-color)',
+        outline: 'none',
+        borderRadius: '2px',
+        cursor: 'pointer'
+      }
+    }),
+    React.createElement('span', {
+      key: 'value',
+      style: {
+        minWidth: '20px',
+        fontWeight: '600',
+        color: 'var(--brand-color)'
+      }
+    }, `${strokeWidth}`)
+  ]);
+};
+
 export default {
   data() {
     return {
-      showCustomUI: true,
+      showCustomUI: false,
       drawer: false,
-      strokeWidth: 1,
+      strokeWidth: 0.1,
       isLoading: false,
       showDropSuccess: false,
       successMessage: "",
+      loading: true,
 
-      //此处为写定的图像来源url 为什么可以实现拖拽到画布，貌似是convas有组织不同来源图片进行绘制的条件
-
-      //要都转为base64格式 然后放入src才行！！！！！！
-
-      //重点！！！！base64格式
       galleryImages: [
         { id: 1, name: "山脉", url: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=600&q=80" },
         { id: 2, name: "海滩", url: "https://images.unsplash.com/photo-1505228395891-9a51e7e86bf6?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=600&q=80" },
-        { id: 3, name: "森林", url: "https://images.unsplash.com/photo-1448375240586-882707db888b?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=600&q=80" },
-        { id: 4, name: "沙漠", url: "https://images.unsplash.com/photo-1418065460487-3e41a6c84dc5?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=600&q=80" },
-        { id: 5, name: "城市", url: "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=600&q=80" },
-        { id: 6, name: "星空", url: "https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=600&q=80" },
+
       ],
       base64Images: {},
       appState: {
         viewBackgroundColor: '#fff',
         currentItemStrokeColor: '#000000',
         currentItemBackgroundColor: '#ffffff',
-        currentItemStrokeWidth: 1,
+        currentItemStrokeWidth: 0.1,
         activeTool: 'selection',
         theme: 'light',
         zoom: 1,
@@ -142,76 +185,308 @@ export default {
       }
     };
   },
+
   async mounted() {
     await this.loadImages();
     this.initializeExcalidraw();
     this.applyCustomCSS();
+    this.loading = false;
   },
+
   beforeDestroy() {
     if (root) {
       root.unmount();
     }
   },
+
   methods: {
+    // 处理画笔粗细变化
+    handleStrokeWidthChange(value) {
+      this.strokeWidth = value;
+      if (excalidrawAPI) {
+        excalidrawAPI.updateScene({
+          appState: {
+            currentItemStrokeWidth: value
+          }
+        });
+      }
+    },
 
+    // 导出为PNG
+    async exportAsPng() {
+      if (!excalidrawAPI) {
+        this.$message.error("画布API未初始化");
+        return;
+      }
 
-    //加载数据url，转为base64格式
+      try {
+        const elements = excalidrawAPI.getSceneElements();
+        const appState = excalidrawAPI.getAppState();
+        const files = excalidrawAPI.getFiles();
+
+        if (elements.length === 0) {
+          this.$message.warning("画布为空，无法导出");
+          return;
+        }
+
+        const canvas = await exportToCanvas({
+          elements,
+          appState,
+          files,
+          exportPadding: 20,
+        });
+
+        const fileName = `drawing-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.png`;
+        
+        canvas.toBlob((blob) => {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          
+          this.$message.success("PNG导出成功!");
+        }, 'image/png');
+
+      } catch (error) {
+        console.error("导出PNG时出错:", error);
+        this.$message.error(`导出PNG失败: ${error.message}`);
+      }
+    },
+
+    // 导出为SVG
+    async exportAsSvg() {
+      if (!excalidrawAPI) {
+        this.$message.error("画布API未初始化");
+        return;
+      }
+
+      try {
+        const elements = excalidrawAPI.getSceneElements();
+        const appState = excalidrawAPI.getAppState();
+        const files = excalidrawAPI.getFiles();
+
+        if (elements.length === 0) {
+          this.$message.warning("画布为空，无法导出");
+          return;
+        }
+
+        const svg = await exportToSvg({
+          elements,
+          appState,
+          files,
+          exportPadding: 20,
+        });
+
+        const fileName = `drawing-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.svg`;
+        const svgData = new XMLSerializer().serializeToString(svg);
+        const blob = new Blob([svgData], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        this.$message.success("SVG导出成功!");
+
+      } catch (error) {
+        console.error("导出SVG时出错:", error);
+        this.$message.error(`导出SVG失败: ${error.message}`);
+      }
+    },
+
+    // 优化后的图片添加方法
+    async addImageToCanvas(imageId) {
+      console.log("===== 开始添加图片到画布 =====");
+      console.log("图片ID:", imageId);
+      
+      if (!excalidrawAPI) {
+        console.error("excalidrawAPI 未初始化");
+        this.$message.error("画布API未初始化");
+        return;
+      }
+      
+      try {
+        const base64Data = this.base64Images[imageId];
+        if (!base64Data) {
+          console.error("未找到图片数据，imageId:", imageId);
+          this.$message.error("未找到图片数据");
+          return;
+        }
+        
+        const fileId = `image-${imageId}-${Date.now()}`;
+        const elementId = `element-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
+        const fileData = {
+          id: fileId,
+          dataURL: base64Data,
+          mimeType: this.getMimeTypeFromBase64(base64Data),
+          created: Date.now()
+        };
+        
+        await excalidrawAPI.addFiles([fileData]);
+        
+        const imageElement = {
+          type: "image",
+          id: elementId,
+          x: 200,
+          y: 200,
+          width: 200,
+          height: 200,
+          angle: 0,
+          strokeColor: "transparent",
+          backgroundColor: "transparent",
+          fillStyle: "solid",
+          strokeWidth: 0.1,
+          strokeStyle: "solid",
+          roughness: 1,
+          opacity: 100,
+          groupIds: [],
+          frameId: null,
+          roundness: null,
+          seed: Math.floor(Math.random() * 2147483648),
+          version: 1,
+          versionNonce: Math.floor(Math.random() * 2147483648),
+          isDeleted: false,
+          boundElements: null,
+          updated: Date.now(),
+          link: null,
+          locked: false,
+          fileId: fileId,
+          scale: [1, 1]
+        };
+        
+        const currentElements = excalidrawAPI.getSceneElements();
+        const newElements = [...currentElements, imageElement];
+        
+        excalidrawAPI.updateScene({
+          elements: newElements
+        });
+        
+        this.saveWithFiles();
+        this.showSuccessMessage("图片添加成功");
+        
+      } catch (error) {
+        console.error("添加图片到画布时出错:", error);
+        this.$message.error(`添加图片失败: ${error.message}`);
+      }
+    },
+
+    // 新增：保存包含文件数据的方法
+    saveWithFiles() {
+      if (!excalidrawAPI) return;
+      
+      const appState = excalidrawAPI.getAppState();
+      const elements = excalidrawAPI.getSceneElements();
+      const files = excalidrawAPI.getFiles();
+      
+      const { collaborators, ...stateToSave } = appState;
+      stateToSave.currentItemStrokeWidth = this.strokeWidth;
+      
+      localStorage.setItem("excalidraw-state", JSON.stringify(stateToSave));
+      localStorage.setItem("excalidraw-elements", JSON.stringify(elements));
+      localStorage.setItem("excalidraw-files", JSON.stringify(files));
+      localStorage.setItem("excalidraw-base64Images", JSON.stringify(this.base64Images));
+    },
+
+    // 从base64数据中提取MIME类型
+    getMimeTypeFromBase64(base64String) {
+      const matches = base64String.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,/);
+      if (matches && matches.length > 1) {
+        return matches[1];
+      }
+      return 'image/jpeg';
+    },
+
+    // 优化后的图片加载方法
     async loadImages() {
-          this.isLoading = true;
-          const imagesMap = {};
+      console.log("===== 开始加载图片 =====");
+      this.isLoading = true;
+      
+      const savedBase64Images = localStorage.getItem("excalidraw-base64Images");
+      if (savedBase64Images) {
+        try {
+          this.base64Images = JSON.parse(savedBase64Images);
+          console.log("从localStorage恢复图片数据成功");
+          this.isLoading = false;
+          return;
+        } catch (error) {
+          console.warn("localStorage中的图片数据无效，重新加载");
+        }
+      }
+      
+      const imagesMap = {};
+      
+      try {
+        for (const [index, image] of this.galleryImages.entries()) {
+          console.log(`正在加载第 ${index + 1} 张图片:`, image.name);
           
           try {
-            // 严格使用 for...of 循环，与 React 一致
-            for (const image of this.galleryImages) {
-              // 完全相同的 fetch 逻辑
-              const response = await fetch(image.url);
-              // 相同的 blob 处理
-              const blob = await response.blob();
-              // 相同的 base64 转换
-              const base64 = await this.convertBlobToBase64(blob);
-              // 相同的存储方式（使用 id 作为键）
-              imagesMap[image.id] = base64;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            
+            const response = await fetch(image.url, {
+              signal: controller.signal,
+              mode: 'cors'
+            });
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+              throw new Error(`HTTP错误: ${response.status}`);
             }
             
-            // 直接赋值，相当于 React 的 setBase64Images
-            this.base64Images = imagesMap;
-          } catch (err) {
-            // 相同的错误处理
-            console.error("图片加载失败:", err);
-            // 添加用户反馈（Vue 方式）
-          
-          } finally {
-            // 相同的加载状态重置
-            this.isLoading = false;
-            // 相同的日志输出
-            console.log("所有图片加载完成");
+            const blob = await response.blob();
+            const base64 = await this.convertBlobToBase64(blob);
+            
+            imagesMap[image.id] = base64;
+            console.log(`图片 ${image.name} 加载成功`);
+            
+          } catch (imageError) {
+            console.error(`图片 ${image.name} 加载失败:`, imageError);
           }
-        },
-  
-  //将u图片转为base64格式
-  // 完全相同的 convertBlobToBase64 方法
-  convertBlobToBase64(blob) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  },
-    
-  //初始化画布数据
+        }
+        
+        this.base64Images = imagesMap;
+        localStorage.setItem("excalidraw-base64Images", JSON.stringify(imagesMap));
+        console.log("图片加载完成并保存到localStorage");
+        
+      } catch (err) {
+        console.error("图片批量加载失败:", err);
+        this.$message.error("图片加载失败，请检查网络连接");
+      } finally {
+        this.isLoading = false;
+      }
+    },
+
+    // base64转换方法
+    convertBlobToBase64(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    },
+
+    // 优化后的初始化方法 - 关键修改
     initializeExcalidraw() {
-      // 从本地存储恢复数据
       const elements = JSON.parse(localStorage.getItem("excalidraw-elements") || "[]");
+      console.log("从localStorage加载的元素:", elements);
       const libs = JSON.parse(localStorage.getItem("excalidraw-libs") || "[]");
       const savedState = JSON.parse(localStorage.getItem("excalidraw-state") || "{}");
+      const savedFiles = JSON.parse(localStorage.getItem("excalidraw-files") || "{}");
       
-      // 如果本地存储有线宽值，使用它
       if (savedState.currentItemStrokeWidth) {
         this.strokeWidth = savedState.currentItemStrokeWidth;
       }
       
-      // 合并保存的状态和默认状态
       const initialState = { ...this.appState, ...savedState };
       
       root = createRoot(document.getElementById("excalidraw"));
@@ -221,7 +496,8 @@ export default {
           initialData: {
             elements: elements,
             libraryItems: libs,
-            appState: initialState
+            appState: initialState,
+            files: savedFiles
           },
           langCode: "zh-CN",
           onChange: this.onChange,
@@ -230,16 +506,32 @@ export default {
           excalidrawAPI: (api) => {
             excalidrawAPI = api;
             window.excalidrawAPI = api;
+          },
+          // 添加自定义UI组件
+          renderTopRightUI: () => {
+            return React.createElement(StrokeWidthSlider, {
+              strokeWidth: this.strokeWidth,
+              onStrokeWidthChange: this.handleStrokeWidthChange
+            });
           }
         })
       );
+    },
+
+    // 显示成功消息
+    showSuccessMessage(message) {
+      this.successMessage = message;
+      this.showDropSuccess = true;
+      
+      setTimeout(() => {
+        this.showDropSuccess = false;
+      }, 3000);
     },
 
     // 更新线条粗细
     updateStrokeWidth(value) {
       if (!excalidrawAPI) return;
       
-      // 更新当前的线条粗细
       excalidrawAPI.updateScene({
         appState: {
           currentItemStrokeWidth: value
@@ -247,16 +539,11 @@ export default {
       });
     },
     
-    // 应用自定义CSS来隐藏更多UI元素
+    // 应用自定义CSS
     applyCustomCSS() {
-      // 创建一个样式元素
       const styleEl = document.createElement('style');
       styleEl.id = 'excalidraw-custom-styles';
-      
-      // 根据当前UI显示状态设置CSS
       this.updateCustomCSS(styleEl);
-      
-      // 添加到文档头部
       document.head.appendChild(styleEl);
     },
     
@@ -264,70 +551,141 @@ export default {
     updateCustomCSS(styleEl = document.getElementById('excalidraw-custom-styles')) {
       if (!styleEl) return;
       
-      // 如果要显示完整UI，则清空样式
       if (this.showCustomUI) {
-        styleEl.textContent = '';
+        styleEl.textContent = `
+          /* 添加画笔粗细滑动条的样式 */
+          .stroke-width-slider-container input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            cursor: pointer;
+          }
+          
+          .stroke-width-slider-container input[type="range"]::-webkit-slider-track {
+            background: var(--default-border-color);
+            height: 4px;
+            border-radius: 2px;
+          }
+          
+          .stroke-width-slider-container input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            background: var(--brand-color);
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+          }
+          
+          .stroke-width-slider-container input[type="range"]::-moz-range-track {
+            background: var(--default-border-color);
+            height: 4px;
+            border-radius: 2px;
+            border: none;
+          }
+          
+          .stroke-width-slider-container input[type="range"]::-moz-range-thumb {
+            background: var(--brand-color);
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+          }
+        `;
         return;
       }
       
-      // 否则，应用隐藏样式
       styleEl.textContent = `
-        /* 隐藏库按钮 */
-        
-        /* 隐藏形状库面板 */
         .layer-ui__library {
           display: none !important;
         }
-        
-        /* 隐藏协作按钮 */
         .CollabButton {
           display: none !important;
         }
-        
-        /* 隐藏右上角菜单的一些项目 */
         .dropdown-menu-group-sessions,
         .dropdown-menu-item-export,
         .dropdown-menu-item-save,
         .dropdown-menu-item-load {
           display: none !important;
         }
-        
-        /* 隐藏缩放控制 */
         .zoom-actions {
           display: none !important;
         }
-        
         .undo-button-container{
-        display: none !important;
+          display: none !important;
         }
-
         .redo-button-container{
-        display: none !important;
+          display: none !important;
         }
-        
         .dropdown-menu-group {
-        display: none !important;
+          display: none !important;
         }
-
         .help-icon{
-        display: none !important;
+          display: none !important;
         }
-
         .default-sidebar-trigger{
-        display: none !important;
+          display: none !important;
+        }
+        button[data-testid="dropdown-menu-button"][type="button"]{
+          display: none !important;
         }
 
-        button[data-testid="dropdown-menu-button"][type="button"]{
-        display: none !important;
+        button[data-testid="main-menu-trigger"][type="button"]{
+          display: none !important;
         }
 
         button[data-testid="search-menu-button"][type="button"]{
-        display: none !important;
+          display: none !important;
         }
-        
-        /* 隐藏右侧的属性面板中的一些高级选项 */
         .panel-row-horizontal > .ToolIcon[title="锁定"] {
           display: none !important;
+        }
+        
+        /* 添加画笔粗细滑动条的样式 */
+        .stroke-width-slider-container input[type="range"] {
+          -webkit-appearance: none;
+          appearance: none;
+          background: transparent;
+          cursor: pointer;
+        }
+        
+        .stroke-width-slider-container input[type="range"]::-webkit-slider-track {
+          background: var(--default-border-color);
+          height: 4px;
+          border-radius: 2px;
+        }
+        
+        .stroke-width-slider-container input[type="range"]::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          background: var(--brand-color);
+          height: 16px;
+          width: 16px;
+          border-radius: 50%;
+          cursor: pointer;
+          border: 2px solid white;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+        
+        .stroke-width-slider-container input[type="range"]::-moz-range-track {
+          background: var(--default-border-color);
+          height: 4px;
+          border-radius: 2px;
+          border: none;
+        }
+        
+        .stroke-width-slider-container input[type="range"]::-moz-range-thumb {
+          background: var(--brand-color);
+          height: 16px;
+          width: 16px;
+          border-radius: 50%;
+          cursor: pointer;
+          border: 2px solid white;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
       `;
     },
@@ -338,55 +696,32 @@ export default {
       this.updateCustomCSS();
     },
     
-    //保存画布
+    // 优化后的保存方法
     save() {
-      if (excalidrawAPI) {
-        const appState = excalidrawAPI.getAppState();
-        const elements = excalidrawAPI.getSceneElements();
-        
-        // 移除不需要保存的属性
-        const { collaborators, ...stateToSave } = appState;
-        
-        // 确保存储当前线宽
-        stateToSave.currentItemStrokeWidth = this.strokeWidth;
-        
-        localStorage.setItem("excalidraw-state", JSON.stringify(stateToSave));
-        localStorage.setItem("excalidraw-elements", JSON.stringify(elements));
-        
-        this.$message.success("保存成功!");
-      }
+      this.saveWithFiles();
+      this.$message.success("保存成功!");
     },
     
-    //导出画布JSON数据
+    // 导出JSON
     exportAsJson() {
       if (excalidrawAPI) {
         const appState = excalidrawAPI.getAppState();
         const elements = excalidrawAPI.getSceneElements();
+        const files = excalidrawAPI.getFiles();
         
-        // 移除不需要保存的属性
         const { collaborators, ...stateToSave } = appState;
-        
-        // 确保导出当前线宽
         stateToSave.currentItemStrokeWidth = this.strokeWidth;
         
-        // 创建包含画布所有信息的对象
         const exportData = {
           elements: elements,
           appState: stateToSave,
           libraries: JSON.parse(localStorage.getItem("excalidraw-libs") || "[]"),
-          files: excalidrawAPI.getFiles() || {}
+          files: files || {},
+          base64Images: this.base64Images
         };
         
-        // 转换为JSON并下载
         const dataStr = JSON.stringify(exportData, null, 2);
-        //此处为画布Json数据的导出
-        //在此提供向后端发送数据的接口
-        /**如果需要发送到后端，可以在这里添加代码*/
-
-
-
         const dataUri = "data:application/json;charset=utf-8," + encodeURIComponent(dataStr);
-        
         const exportFileName = `drawing-${new Date().toISOString().slice(0, 10)}.json`;
         
         const linkElement = document.createElement("a");
@@ -396,16 +731,13 @@ export default {
       }
     },
     
-    //触发导入功能（Json画布数据导入)
+    // 触发导入
     triggerImport() {
       document.getElementById("jsonImport").click();
     },
     
+    // 优化后的导入方法
     importFromJson(event) {
-      //此函数为处理从文件输入导入JSON数据
-      ///以下实现为本地文件夹导入Json画布数据，
-      /**以下可添加接口请求，接收后端传来的JSON数据，进行画布载入 */
-
       const file = event.target.files[0];
       if (file) {
         const reader = new FileReader();
@@ -413,9 +745,7 @@ export default {
           try {
             const jsonData = JSON.parse(e.target.result);
             
-            // 检查是否包含必要的数据
             if (jsonData.elements && jsonData.appState) {
-              // 更新本地存储
               localStorage.setItem("excalidraw-elements", JSON.stringify(jsonData.elements));
               localStorage.setItem("excalidraw-state", JSON.stringify(jsonData.appState));
               
@@ -423,12 +753,19 @@ export default {
                 localStorage.setItem("excalidraw-libs", JSON.stringify(jsonData.libraries));
               }
               
-              // 更新线宽滑块值
+              if (jsonData.files) {
+                localStorage.setItem("excalidraw-files", JSON.stringify(jsonData.files));
+              }
+              
+              if (jsonData.base64Images) {
+                localStorage.setItem("excalidraw-base64Images", JSON.stringify(jsonData.base64Images));
+                this.base64Images = jsonData.base64Images;
+              }
+              
               if (jsonData.appState.currentItemStrokeWidth) {
                 this.strokeWidth = jsonData.appState.currentItemStrokeWidth;
               }
               
-              // 重新加载画布
               this.reloadCanvas(jsonData);
               this.$message.success("导入成功!");
             } else {
@@ -442,14 +779,12 @@ export default {
         reader.readAsText(file);
       }
       
-      // 重置文件输入，允许重复选择同一文件
       event.target.value = null;
     },
     
-    //重载画布
+    // 重载画布
     reloadCanvas(data) {
       if (excalidrawAPI) {
-        // 确保files数据也被加载
         excalidrawAPI.updateScene({
           elements: data.elements,
           appState: data.appState,
@@ -458,10 +793,16 @@ export default {
       }
     },
     
-    onChange(elements) {
+    // onChange事件处理
+    onChange(elements, appState, files) {
       localStorage.setItem("excalidraw-elements", JSON.stringify(elements));
+      
+      if (files) {
+        localStorage.setItem("excalidraw-files", JSON.stringify(files));
+      }
     },
     
+    // 库变化处理
     onLibraryChange(libraryItems) {
       localStorage.setItem("excalidraw-libs", JSON.stringify(libraryItems));
     }
@@ -472,6 +813,7 @@ export default {
 <style scoped lang="scss">
 .container {
   display: flex;
+  flex-direction: row;
   height: 100vh;
   background-color: #f5f7fa;
   overflow: hidden;
@@ -479,10 +821,8 @@ export default {
   
   .excalidraw {
     flex: 1;
-    height: 100%;
+    height: 100vh;
     border: 1px solid #ebeef5;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
     background-color: white;
     z-index: 1;
   }
@@ -493,7 +833,7 @@ export default {
     flex-direction: column;
     justify-content: center;
     gap: 20px;
-    padding: 20px;
+    
     background-color: white;
     border-left: 1px solid #ebeef5;
     box-shadow: -5px 0 15px rgba(0, 0, 0, 0.05);
@@ -507,38 +847,61 @@ export default {
       .el-button {
         width: 100%;
       }
+      
+      .export-button {
+        padding: 0.5rem 1rem;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 13px;
+        transition: all 0.3s ease;
+        
+        &.png-button {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          
+          &:hover {
+            background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+          }
+        }
+        
+        &.svg-button {
+          background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+          color: white;
+          
+          &:hover {
+            background: linear-gradient(135deg, #ee82e9 0%, #f3455a 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(240, 147, 251, 0.4);
+          }
+        }
+        
+        &:active {
+          transform: translateY(0);
+        }
+      }
     }
   }
   
-.slider-container {
-  span{
-    color: #038fe5;
-    font-size: 13px;
-    font-weight: bold; 
-  }
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  background-color: white;
-  padding: 8px;
-  border-radius: 4px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-  
   .gallery-content {
-    padding: 20px;
+    top: 0;
+    right: 200px;
+    bottom: 0;
+    width: 240px;
+    background: white;
+    box-shadow: -5px 0 15px rgba(0, 0, 0, 0.1);
+    overflow-y: auto;
+    z-index: 2;
+    margin-right: 20px;
     
     .drag-instructions {
       text-align: center;
-      margin-bottom: 20px;
+      margin: 15px 0;
       
-      .el-tag {
-        margin-bottom: 10px;
-      }
-      
-      p {
-        color: #606266;
+      span {
         font-size: 14px;
+        font-weight: 500;
       }
     }
     
@@ -546,6 +909,7 @@ export default {
       display: grid;
       grid-template-columns: repeat(1, 1fr);
       gap: 20px;
+      padding: 10px;
     }
     
     .gallery-item {
@@ -589,38 +953,34 @@ export default {
           font-size: 12px;
           color: #909399;
           margin-top: 5px;
-          
-          i {
-            margin-right: 4px;
-          }
         }
       }
     }
   }
 
   button {
-      padding: 0.3rem 0.8rem;
-      background-color: white;
-      color: #038fe5;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-weight: bold;
-      transition: all 0.2s;
-      
-      &:hover {
-        background-color: #f0f0f0;
-        transform: translateY(-1px);
-      }
-      
-      &:active {
-        transform: translateY(0);
-      }
+    padding: 0.3rem 0.8rem;
+    background-color: white;
+    color: #038fe5;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.2s;
+    
+    &:hover {
+      background-color: #f0f0f0;
+      transform: translateY(-1px);
     }
+    
+    &:active {
+      transform: translateY(0);
+    }
+  }
   
   .drop-success-message {
     position: fixed;
-    top: 20px;
+    top: 80px;
     left: 50%;
     transform: translateX(-50%);
     background: white;
@@ -643,52 +1003,8 @@ export default {
       font-weight: 500;
     }
   }
-  
-  .loading-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    z-index: 3000;
-    backdrop-filter: blur(4px);
-    
-    .spinner {
-      width: 60px;
-      height: 60px;
-      border: 5px solid rgba(255, 255, 255, 0.3);
-      border-radius: 50%;
-      border-top: 5px solid #038fe5;
-      animation: spin 1s linear infinite;
-      margin-bottom: 20px;
-    }
-    
-    p {
-      color: white;
-      font-size: 1.2rem;
-      font-weight: 500;
-    }
-  }
 }
 
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.fade-enter-active, .fade-leave-active {
-  transition: opacity 0.5s;
-}
-.fade-enter, .fade-leave-to {
-  opacity: 0;
-}
-
-/* 修复可能的 Excalidraw UI 样式冲突 */
 :global(.excalidraw) {
   --sat: env(safe-area-inset-top);
   --sab: env(safe-area-inset-bottom);
